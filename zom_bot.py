@@ -1,25 +1,28 @@
 import discord
 import asyncio
+import os
+from dotenv import load_dotenv
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
 
-DISCORD_TOKEN = "MTQzODY2MDE3NzU1NjY2ODUxNw.GLgKGo.EKghT6qMAjdEQeutG9mpsr25BUvXPTKAvNWNcA"
-BOT_ID = "1438660177556668517"
+load_dotenv()
+
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+BOT_ID = os.getenv("BOT_ID")  # Bot Application ID
 
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 
 browser_context = None
-user_pages = {}         # user_id -> Gemini page
+user_pages = {}
 task_queue = asyncio.Queue()
 
 INPUT_SELECTOR = "div[contenteditable='true']"
 RESPONSE_SELECTOR = "div.markdown"
 
-
-# ---------------------------------------------------------
-# INITIALIZE PLAYWRIGHT + PERSISTENT BROWSER
-# ---------------------------------------------------------
+# ---------------------------------------------
+# Initialize Playwright browser
+# ---------------------------------------------
 async def init_browser(playwright):
     global browser_context
 
@@ -28,11 +31,10 @@ async def init_browser(playwright):
         headless=True
     )
 
-
+# ---------------------------------------------
+# User-specific page (each person gets a chat)
+# ---------------------------------------------
 async def get_user_page(user_id):
-    """Each user gets their own Gemini chat tab."""
-    global user_pages
-
     if user_id in user_pages:
         return user_pages[user_id]
 
@@ -43,97 +45,115 @@ async def get_user_page(user_id):
     user_pages[user_id] = page
     return page
 
+# ---------------------------------------------
+# Reset a user's chat
+# ---------------------------------------------
+async def new_chat_for_user(user_id):
+    if user_id in user_pages:
+        try:
+            await user_pages[user_id].close()
+        except:
+            pass
+        del user_pages[user_id]
 
-# ---------------------------------------------------------
-# GEMINI ASK FUNCTION
-# ---------------------------------------------------------
+# ---------------------------------------------
+# Ask Gemini
+# ---------------------------------------------
 async def ask_gemini(page, question):
-    # click + type into the input
     await page.click(INPUT_SELECTOR)
     await page.fill(INPUT_SELECTOR, question)
     await page.keyboard.press("Enter")
 
-    # wait for answer OR detect error
     try:
         await page.wait_for_selector(RESPONSE_SELECTOR, timeout=60000)
     except PlaywrightTimeout:
-        return "Gemini did not respond in time. Might be rate-limited."
+        return "Gemini did not respond in time."
 
-    # detect “Try again” or rate limit messages
     try_again = await page.query_selector("button:has-text('Try again')")
-    over_limit = await page.query_selector("text=limit")
+    limit = await page.query_selector("text=limit")
     error_box = await page.query_selector("text=Something went wrong")
 
     if try_again:
-        return "Gemini shows a 'Try Again' button. Probably rate-limited."
+        return "Gemini shows 'Try again'. Probably rate-limited."
 
-    if over_limit:
+    if limit:
         return "Gemini usage limit reached."
 
     if error_box:
-        return "Gemini had an error."
+        return "Gemini encountered an error."
 
-    # otherwise return latest markdown response
     answers = await page.query_selector_all(RESPONSE_SELECTOR)
     return await answers[-1].inner_text()
 
-
-# ---------------------------------------------------------
-# QUEUE WORKER (so only one browser task runs at a time)
-# ---------------------------------------------------------
+# ---------------------------------------------
+# Queue Worker
+# ---------------------------------------------
 async def worker():
     while True:
-        user_id, question, channel, thinking_msg = await task_queue.get()
+        user_id, question, channel, thinking_message = await task_queue.get()
         try:
             page = await get_user_page(user_id)
             answer = await ask_gemini(page, question)
-            await thinking_msg.delete()
+            await thinking_message.delete()
             await channel.send(answer)
         except Exception as e:
-            await thinking_msg.delete()
+            await thinking_message.delete()
             await channel.send(f"Error: {e}")
         finally:
             task_queue.task_done()
 
-
-# ---------------------------------------------------------
-# DISCORD EVENTS
-# ---------------------------------------------------------
+# ---------------------------------------------
+# Discord Events
+# ---------------------------------------------
 @client.event
 async def on_ready():
-    print(f"zom is alive as {client.user}")
-
+    print(f"Bot logged in as {client.user}")
     asyncio.create_task(start_playwright())
     asyncio.create_task(worker())
-
 
 @client.event
 async def on_message(message):
     if message.author == client.user:
         return
 
-    if f"<@{BOT_ID}>" in message.content:
-        question = message.content.split(">", 1)[1].strip()
+    content = message.content.strip()
 
-        thinking_msg = await message.channel.send("🧠 Thinking…")
+    if not f"<@{BOT_ID}>" in content:
+        return
 
+    text = content.split(">", 1)[1].strip()
+
+    # NEWCHAT COMMAND
+    if text.lower().startswith("newchat"):
+        await new_chat_for_user(message.author.id)
+        question = text.replace("newchat", "", 1).strip()
+
+        if question == "":
+            await message.channel.send("New chat created. Ask something now.")
+            return
+
+        thinking = await message.channel.send("🧠 Thinking…")
         await task_queue.put((
-            message.author.id,
-            question,
-            message.channel,
-            thinking_msg
+            message.author.id, question, message.channel, thinking
         ))
+        return
 
+    # Normal question
+    thinking = await message.channel.send("🧠 Thinking…")
+    await task_queue.put((
+        message.author.id, text, message.channel, thinking
+    ))
 
-# ---------------------------------------------------------
-# PLAYWRIGHT STARTUP
-# ---------------------------------------------------------
+# ---------------------------------------------
+# Start Playwright
+# ---------------------------------------------
 async def start_playwright():
     async with async_playwright() as pw:
         await init_browser(pw)
         while True:
             await asyncio.sleep(1)
 
-
+# ---------------------------------------------
+# Launch
+# ---------------------------------------------
 client.run(DISCORD_TOKEN)
-
