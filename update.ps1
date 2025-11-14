@@ -1,4 +1,4 @@
-Write-Host "=== AIDC-Bot Updater ==="
+Write-Host "=== vito-Bot Updater ==="
 
 if (-not (Test-Path "venv")) {
     Write-Host "No installation found. Run install.ps1 first."
@@ -15,4 +15,4 @@ Write-Host "Updating repository..."
 git pull
 
 Write-Host "Starting bot..."
-python zom_bot.py
+python main.py
