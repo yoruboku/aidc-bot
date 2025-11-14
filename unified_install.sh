@@ -14,7 +14,7 @@ RESET="\e[0m"
 echo -e "${CYAN}"
 echo "#########################################"
 echo "#                                       #"
-echo "#         BOKU AIDC - Installer         #"
+echo "#         VITO - Installer              #"
 echo "#                                       #"
 echo "#########################################"
 echo -e "${RESET}"
@@ -29,7 +29,7 @@ if [ -d "venv" ] && [ -f ".env" ]; then
     pip install -r requirements.txt
     playwright install chromium
     echo -e "${GREEN}Starting bot...${RESET}"
-    python3 zom_bot.py
+    python3 main.py
     exit 0
 fi
 
@@ -72,4 +72,4 @@ EOF
 
 # Step 5: Start bot
 echo -e "${GREEN}Starting BOKU AIDC Bot...${RESET}"
-python3 zom_bot.py
+python3 main.py
