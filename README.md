@@ -142,4 +142,4 @@ Contact: [omenboku@gmail.com](mailto:omenboku@gmail.com)
 
 ---
 
-Made by python using yoruboku.
+Made by Python using YoruBoku.
