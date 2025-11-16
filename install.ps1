@@ -1,80 +1,125 @@
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Banner {
-    Write-Host "============================================" -ForegroundColor Cyan
-    Write-Host "          V I T O   I N S T A L L E R       " -ForegroundColor Cyan
-    Write-Host "============================================" -ForegroundColor Cyan
+    Write-Host "╔═══════════════════════════════════════════════╗" -ForegroundColor Magenta
+    Write-Host "║           V I T O   A I   C O R E            ║" -ForegroundColor Magenta
+    Write-Host "║      Discord × Gemini × Playwright           ║" -ForegroundColor Magenta
+    Write-Host "╚═══════════════════════════════════════════════╝" -ForegroundColor Magenta
 }
 Banner
 
-# Python detection
-$py = (Get-Command python, python3, py -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-if (-not $py) { Write-Host "Python not found. Install Python 3.11+" -ForegroundColor Red; exit }
+# --- Python detection ---
+$pyCmd = (Get-Command python, python3, py -ErrorAction SilentlyContinue | Select-Object -First 1)
+if (-not $pyCmd) {
+    Write-Host "[!] Python 3.11+ not found. Install Python first." -ForegroundColor Red
+    exit 1
+}
+$PY = $pyCmd.Source
+Write-Host "[✓] Python detected: $PY" -ForegroundColor Green
 
-Write-Host "Using Python: $py" -ForegroundColor Green
-
-# Quick-run if installed
-if (Test-Path "venv" -and Test-Path ".env") {
-    Write-Host "Updating dependencies..." -ForegroundColor Yellow
-    & $py -m pip install --upgrade pip
-    & $py -m pip install -r requirements.txt
-    & $py -m playwright install chromium
-    Write-Host "Starting VITO..." -ForegroundColor Green
-    & $py main.py
-    exit
+function Run-Bot {
+    Write-Host "[*] Spinning up VITO core..." -ForegroundColor Cyan
+    & venv\Scripts\Activate.ps1
+    & $PY main.py
 }
 
-# New install
-Write-Host "Creating virtual environment..." -ForegroundColor Blue
-& $py -m venv venv
-& "venv\Scripts\Activate.ps1"
+function Do-Install {
+    Write-Host "▶ STEP 1: Virtual environment" -ForegroundColor Blue
+    & $PY -m venv venv
+    & venv\Scripts\Activate.ps1
 
-Write-Host "Installing dependencies..." -ForegroundColor Blue
-pip install --upgrade pip
-pip install -r requirements.txt
-& $py -m playwright install chromium
+    Write-Host "▶ STEP 2: Dependencies" -ForegroundColor Blue
+    pip install --upgrade pip
+    pip install -r requirements.txt
+    & $PY -m playwright install chromium
 
-# Credentials
-do {
-    $token = Read-Host "Enter BOT TOKEN"
-    $id = Read-Host "Enter BOT ID (numbers only)"
-    Write-Host "TOKEN: $($token.Substring(0,8))...  BOT: $id" -ForegroundColor Magenta
-    $ok = Read-Host "Is this correct? (y/n)"
-} until ($ok -match "^[Yy]$")
-
-# Owner mode
-Write-Host "`nOwner Selection" -ForegroundColor Cyan
-Write-Host "1) Default (only 'yoruboku')"
-Write-Host "2) Custom Owners"
-$choice = Read-Host ">"
-
-$owners = ""
-if ($choice -eq "2") {
+    # Credentials
+    Write-Host "▶ STEP 3: Discord credentials" -ForegroundColor Blue
     while ($true) {
-        $n = Read-Host "Enter owner username"
-        if ($owners -eq "") { $owners = $n } else { $owners += ",$n" }
-        $m = Read-Host "Add another? (y/n)"
-        if ($m -notmatch "^[Yy]$") { break }
+        $token = Read-Host "Discord BOT TOKEN"
+        $botId = Read-Host "Discord BOT ID (numeric)"
+        if ($botId -notmatch '^\d+$') {
+            Write-Host "[!] BOT ID must be numeric." -ForegroundColor Red
+            continue
+        }
+        Write-Host ("TOKEN: {0}..." -f ($token.Substring(0, [Math]::Min(8, $token.Length)))) -ForegroundColor Magenta
+        Write-Host ("BOT ID: {0}" -f $botId) -ForegroundColor Magenta
+        $ok = Read-Host "Is this correct? (y/n)"
+        if ($ok -match '^[Yy]') { break }
     }
-}
 
-# Write .env
-Set-Content ".env" "DISCORD_TOKEN=$token`nBOT_ID=$id`nOWNERS=$owners"
+    # Owner mode
+    Write-Host "▶ STEP 4: Owner configuration" -ForegroundColor Blue
+    Write-Host "  [1] Default (priority owner 'yoruboku' only)" -ForegroundColor Cyan
+    Write-Host "  [2] Custom owners" -ForegroundColor Cyan
+    Write-Host "  [3] No owners" -ForegroundColor Cyan
+    $choice = Read-Host "Select [1-3] (Enter = 1)"
+    if ($choice -notmatch '^[123]$') { $choice = "1" }
 
-# Persistent login
-Write-Host "`nLaunching Gemini...`n" -ForegroundColor Cyan
+    $owners = ""
+    if ($choice -eq "2") {
+        while ($true) {
+            $u = Read-Host "Owner username (empty to finish)"
+            if ([string]::IsNullOrWhiteSpace($u)) { break }
+            if ($owners -eq "") { $owners = $u } else { $owners += ",$u" }
+        }
+    }
 
-& $py - << 'EOF'
+    Write-Host ("Owners: {0}" -f ($(if ($owners) { $owners } else { "<none (yoruboku only)>" }))) -ForegroundColor Magenta
+
+    # .env
+    Write-Host "▶ STEP 5: Writing .env" -ForegroundColor Blue
+    @"
+DISCORD_TOKEN=$token
+BOT_ID=$botId
+OWNERS=$owners
+"@ | Out-File -Encoding utf8 .env
+    Write-Host "[✓] .env created" -ForegroundColor Green
+
+    # Gemini login
+    Write-Host "▶ STEP 6: Gemini login" -ForegroundColor Blue
+    Write-Host "[*] Launching Chromium persistent context..." -ForegroundColor Cyan
+
+    $code = @"
 from playwright.sync_api import sync_playwright
 import os
-os.makedirs("playwright_data", exist_ok=True)
+os.makedirs('playwright_data', exist_ok=True)
 with sync_playwright() as p:
-    ctx = p.chromium.launch_persistent_context("playwright_data", headless=False)
+    ctx = p.chromium.launch_persistent_context('playwright_data', headless=False)
     pg = ctx.new_page()
-    pg.goto("https://gemini.google.com")
-    print("Login in browser, then *close browser* to continue.")
-    ctx.wait_for_event("close")
-EOF
+    pg.goto('https://gemini.google.com')
+    print('\\n────────────────────────────────────────────')
+    print('  Log in to GEMINI in the opened browser.')
+    print('  When finished, close the browser window.')
+    print('────────────────────────────────────────────\\n')
+    ctx.wait_for_event('close')
+"@
+    & $PY -c $code
 
-Write-Host "Starting VITO..." -ForegroundColor Green
-& $py main.py
+    Run-Bot
+}
+
+# --- Main menu logic ---
+
+$hasInstall = (Test-Path "venv" -PathType Container) -and (Test-Path ".env")
+
+if ($hasInstall) {
+    Write-Host ""
+    Write-Host "VITO Launcher" -ForegroundColor Cyan
+    Write-Host "  [1] Run VITO (default)" -ForegroundColor Gray
+    Write-Host "  [2] Reinstall / fresh setup" -ForegroundColor Gray
+    Write-Host "  [3] Exit" -ForegroundColor Gray
+    $sel = Read-Host "Select [1-3] (Enter = 1)"
+    if ($sel -eq "2") {
+        Do-Install
+    } elseif ($sel -eq "3") {
+        Write-Host "Exiting VITO launcher." -ForegroundColor Yellow
+        exit 0
+    } else {
+        Run-Bot
+    }
+} else {
+    Write-Host "[!] No existing install found. Running full install..." -ForegroundColor Yellow
+    Do-Install
+}
