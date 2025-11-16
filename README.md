@@ -54,7 +54,7 @@ cd vito-bot
 
 ```bash
 chmod +x unified_install.sh
-./unified_install.sh
+./install.sh
 ```
 
 #### Windows (PowerShell)
