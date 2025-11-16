@@ -1,61 +1,76 @@
-# Colors (using Write-Host with -ForegroundColor)
-Write-Host "#########################################" -ForegroundColor Cyan
-Write-Host "#                                       #" -ForegroundColor Cyan
-Write-Host "#         VITO - Installer              #" -ForegroundColor Cyan
-Write-Host "#                                       #" -ForegroundColor Cyan
-Write-Host "#########################################" -ForegroundColor Cyan
+# install.ps1 - Windows installer for VITO (styled)
+param()
+function writec([string]$text,[string]$color="White"){ Write-Host $text -ForegroundColor $color }
 
-Start-Sleep 1
+writec "#########################################" Cyan
+writec "#                                       #" Cyan
+writec "#              V I T O - Installer      #" Cyan
+writec "#                                       #" Cyan
+writec "#########################################" Cyan
+Start-Sleep -Seconds 1
 
-# Check if installed
+# Pick python
+$py = Get-Command python -ErrorAction SilentlyContinue
+if (-not $py) { writec "Python not found. Install Python 3.9+ and re-run." Red; exit 1 }
+
 if (Test-Path "venv" -and Test-Path ".env") {
-    Write-Host "Bot already installed. Updating dependencies..." -ForegroundColor Yellow
-    & venv\Scripts\Activate.ps1
+    writec "Existing installation found. Updating dependencies..." Yellow
+    & .\venv\Scripts\Activate.ps1
     pip install --upgrade pip
     pip install -r requirements.txt
-    playwright install chromium
-    Write-Host "Starting bot..." -ForegroundColor Green
+    python -m playwright install chromium
+    writec "Starting VITO..." Green
     python main.py
-    exit
+    exit 0
 }
 
-# Step 1: Create virtual environment
-Write-Host "Creating virtual environment..." -ForegroundColor Blue
+writec "Creating virtual environment..." Blue
 python -m venv venv
-& venv\Scripts\Activate.ps1
+.\venv\Scripts\Activate.ps1
 
-# Step 2: Install dependencies
-Write-Host "Installing Python dependencies..." -ForegroundColor Blue
+writec "Installing dependencies..." Blue
 pip install --upgrade pip
 pip install -r requirements.txt
-playwright install chromium
 
-# Step 3: Setup .env
-Write-Host "Setting up Discord credentials..." -ForegroundColor Magenta
-$DISCORD_TOKEN = Read-Host "Enter your Discord Bot Token"
-$BOT_ID = Read-Host "Enter your Discord Bot ID"
+writec "Installing Playwright Chromium..." Blue
+python -m playwright install chromium
+
+# Ask for token and ID with confirmation
+while ($true) {
+    $token = Read-Host "Enter your Discord Bot TOKEN"
+    $botid = Read-Host "Enter your Discord Bot ID (numeric)"
+    writec "`nYou entered:" Magenta
+    writec ("DISCORD_TOKEN: {0}..." -f $token.Substring(0,[Math]::Min(6,$token.Length))) Magenta
+    writec ("BOT_ID: {0}" -f $botid) Magenta
+    $ok = Read-Host "Is this correct? (y/n)"
+    if ($ok -match '^[Yy]') { break }
+}
+
+# Write .env
 @"
-DISCORD_TOKEN=$DISCORD_TOKEN
-BOT_ID=$BOT_ID
+DISCORD_TOKEN=$token
+BOT_ID=$botid
 "@ | Out-File -Encoding utf8 .env
-Write-Host ".env created!" -ForegroundColor Green
+writec ".env created and secured." Green
 
-# Step 4: Launch Chromium for Gemini login
-Write-Host "Opening Chromium for Gemini login..." -ForegroundColor Cyan
-python - <<EOF
+# Open Playwright headful browser for Gemini login
+writec "Opening Chromium for Gemini login..." Cyan
+python - <<'PY'
 from playwright.sync_api import sync_playwright
 import os
 os.makedirs("playwright_data", exist_ok=True)
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=False)
-    context = browser.new_context(storage_state="playwright_data/state.json")
+    context = browser.new_context()
     page = context.new_page()
     page.goto("https://gemini.google.com/")
-    print("Please log in to Gemini. After login, type 'done' and press Enter.")
-    input("Type 'done' once logged in: ")
+    print("Please log in to Gemini. When finished, type 'done' here.")
+    try:
+        input("Type 'done' once logged in: ")
+    except:
+        pass
     browser.close()
-EOF
+PY
 
-# Step 5: Start bot
-Write-Host "Starting BOKU AIDC Bot..." -ForegroundColor Green
+writec "Starting VITO..." Green
 python main.py
